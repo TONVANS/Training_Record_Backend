@@ -1,0 +1,381 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =======================
+// ENUMS
+// =======================
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum CourseStatus {
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum MaterialType {
+  PDF
+  URL
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum TrainingFormat {
+  ONLINE
+  ONSITE
+}
+
+enum LocationType {
+  DOMESTIC
+  INTERNATIONAL
+}
+
+// =======================
+// ORGANIZATION MASTER DATA
+// =======================
+
+// 1. Department (ຝ່າຍ/ກົມ)
+model Department {
+  id     Int     @id
+  code   String? @unique
+  name   String
+  status String? @default("A")
+
+  divisions Division[]
+
+  // Relations
+  employees    Employee[]    @relation("DirectDepartment") // ພະນັກງານທີ່ສັງກັດໂດຍກົງ
+  offices      Office[]
+  placeOffices PlaceOffice[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+// 2. Division (ພະແນກ)
+model Division {
+  id     Int     @id
+  code   String? @unique
+  name   String
+  status String? @default("A")
+
+  department_id Int?
+  department    Department? @relation(fields: [department_id], references: [id])
+
+  units Unit[]
+
+  employees    Employee[]    @relation("DirectDivision") // ພະນັກງານທີ່ສັງກັດໂດຍກົງ
+  offices      Office[]
+  placeOffices PlaceOffice[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([department_id])
+}
+
+// 3. Unit (ໜ່ວຍງານ)
+model Unit {
+  id     Int     @id
+  code   String? @unique
+  name   String
+  status String? @default("A")
+
+  division_id Int?
+  division    Division? @relation(fields: [division_id], references: [id])
+
+  employees    Employee[]    @relation("DirectUnit") // ພະນັກງານທີ່ສັງກັດໂດຍກົງ
+  offices      Office[]
+  placeOffices PlaceOffice[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([division_id])
+}
+
+// 4. Position (ຊື່ຕຳແໜ່ງງານຕົວຈິງ)
+model Position {
+  id     Int     @id
+  code   String?
+  name   String
+  status String? @default("A")
+
+  employees    Employee[]    @relation("DirectPosition") // ພະນັກງານທີ່ຖືຕຳແໜ່ງນີ້ໂດຍກົງ
+  offices      Office[]
+  placeOffices PlaceOffice[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+// 5. Position Group (ກຸ່ມຕຳແໜ່ງ)
+model PositionGroup {
+  id   Int    @id // pos_group_id
+  name String // pos_group_name ("G")
+
+  positionCodes PositionCode[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+// 6. Position Code (ລະຫັດຕຳແໜ່ງ/ປະເພດສະມາຊິກ)
+model PositionCode {
+  id     Int     @id // pos_code_id
+  name   String // pos_code_name ("Member")
+  status String? @default("A")
+
+  group_id Int? // pos_group_id
+  group    PositionGroup? @relation(fields: [group_id], references: [id])
+
+  employees Employee[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+}
+
+// =======================
+// EMPLOYEE DETAILS (Office & PlaceOffice)
+// =======================
+
+// Table ສຳລັບເກັບຂໍ້ມູນ "Office" (ລາຍລະອຽດສັງກັດທາງການ ເພີ່ມເຕີມ)
+model Office {
+  id Int @id @default(autoincrement()) // ຫຼືໃຊ້ place_office_id ຈາກ JSON
+
+  employee_id Int      @unique // 1 Employee ມີ 1 Office Active
+  employee    Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  // References to Organization
+  department_id Int?
+  department    Department? @relation(fields: [department_id], references: [id])
+
+  division_id Int?
+  division    Division? @relation(fields: [division_id], references: [id])
+
+  unit_id Int?
+  unit    Unit? @relation(fields: [unit_id], references: [id])
+
+  pos_id   Int?
+  position Position? @relation(fields: [pos_id], references: [id])
+
+  // Specific Fields from JSON
+  special_subject_id Int?
+  revolution_date    DateTime?
+  state_date         DateTime?
+  remark             String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([department_id])
+  @@index([division_id])
+}
+
+// Table ສຳລັບເກັບຂໍ້ມູນ "PlaceOffice" (ບ່ອນປະຈຳການຕົວຈິງ)
+model PlaceOffice {
+  id Int @id @default(autoincrement())
+
+  employee_id Int      @unique
+  employee    Employee @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  // References to Organization
+  department_id Int?
+  department    Department? @relation(fields: [department_id], references: [id])
+
+  division_id Int?
+  division    Division? @relation(fields: [division_id], references: [id])
+
+  unit_id Int?
+  unit    Unit? @relation(fields: [unit_id], references: [id])
+
+  pos_id   Int?
+  position Position? @relation(fields: [pos_id], references: [id])
+
+  // Specific Fields
+  special_subject_id Int?
+  revolution_date    DateTime?
+  state_date         DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([department_id])
+  @@index([division_id])
+}
+
+// =======================
+// EMPLOYEE MODEL
+// =======================
+model Employee {
+  id            Int            @id @default(autoincrement()) // emp_id
+  emp_id_ref    Int?           @unique // ໃຊ້ map ກັບ 5658
+  employee_code String         @unique // emp_code (44481)
+  // Personal Info
+  first_name_la String
+  last_name_la  String
+  email         String?        @unique
+  phone         String?
+  image         String?
+  gender        Gender         @default(MALE)
+  status        EmployeeStatus @default(ACTIVE)
+  // Auth
+  password      String         @default("EDL@123456")
+  role          Role           @default(EMPLOYEE)
+  // --- Main Organization Affiliation (ສັງກັດຫຼັກ - ເພີ່ມໃໝ່ຕາມຄຳຂໍ) ---
+  department_id Int?
+  department    Department?    @relation("DirectDepartment", fields: [department_id], references: [id])
+
+  division_id Int?
+  division    Division? @relation("DirectDivision", fields: [division_id], references: [id])
+
+  unit_id Int?
+  unit    Unit? @relation("DirectUnit", fields: [unit_id], references: [id])
+
+  position_id Int?
+  position    Position? @relation("DirectPosition", fields: [position_id], references: [id])
+  // -------------------------------------------------------------
+
+  // Position Code Link
+  pos_code_id  Int?
+  positionCode PositionCode? @relation(fields: [pos_code_id], references: [id])
+
+  // Relations to Office & PlaceOffice Details
+  office      Office?
+  placeOffice PlaceOffice?
+
+  // Special Subject (Technical/Administrative)
+  special_subject_id Int?
+  specialSubject     SpecialSubject? @relation(fields: [special_subject_id], references: [special_subject_id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Training System Relations
+  enrollments Enrollment[]
+
+  @@index([employee_code])
+  @@index([email])
+  @@index([department_id]) // Index ເພື່ອໃຫ້ Query ຕາມ Department ໄວຂຶ້ນ
+}
+
+model TrainingCategory {
+  id      Int      @id @default(autoincrement())
+  name    String   @unique
+  courses Course[]
+
+  @@index([name])
+}
+
+model SpecialSubject {
+  special_subject_id   Int    @id @default(autoincrement())
+  special_subject_name String
+
+  employees Employee[]
+
+  @@index([special_subject_name])
+}
+
+model Course {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  category_id Int
+  start_date  DateTime
+  end_date    DateTime
+
+  // --- Updated Location Logic ---
+  format TrainingFormat @default(ONSITE)
+
+  // If format is ONSITE, location_type is required
+  location_type LocationType?
+
+  // If format is ONLINE -> Store Meeting Link here
+  // If format is ONSITE & DOMESTIC -> Store Venue Name here
+  location String?
+
+  // If format is ONSITE & INTERNATIONAL -> Store Country Name here
+  country String?
+
+  budget Decimal      @default(0.0)
+  status CourseStatus @default(SCHEDULED)
+
+  // Additional Course Details
+  trainer      String?
+  institution  String?
+  organization String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  category    TrainingCategory @relation(fields: [category_id], references: [id])
+  materials   CourseMaterial[]
+  enrollments Enrollment[]
+
+  @@index([category_id])
+  @@index([status])
+  @@index([start_date])
+  @@index([format])
+}
+
+model CourseMaterial {
+  id                Int          @id @default(autoincrement())
+  course_id         Int
+  type              MaterialType
+  file_path_or_link String
+  created_at        DateTime     @default(now())
+
+  course Course @relation(fields: [course_id], references: [id], onDelete: Cascade)
+
+  @@index([course_id])
+}
+
+model Enrollment {
+  id              Int              @id @default(autoincrement())
+  employee_id     Int
+  course_id       Int
+  status          EnrollmentStatus @default(ENROLLED)
+  certificate_url String?
+  enrolled_at     DateTime         @default(now())
+  updated_at      DateTime         @updatedAt
+
+  employee Employee @relation(fields: [employee_id], references: [id])
+  course   Course   @relation(fields: [course_id], references: [id])
+
+  @@unique([employee_id, course_id])
+  @@index([employee_id])
+  @@index([course_id])
+  @@index([status])
+}
