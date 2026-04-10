@@ -2,12 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CourseStatus } from '@prisma/client';
+import { SyncService } from '../sync/sync.service';
 
 @Injectable()
 export class CronService {
   private readonly logger = new Logger(CronService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly syncService: SyncService,
+  ) {}
 
   // ทำงานทุกวันเวลา 9:00 น.
   @Cron('0 9 * * *')
@@ -52,6 +56,18 @@ export class CronService {
       }
     } catch (error) {
       this.logger.error('Error updating course statuses', error);
+    }
+  }
+
+  // ทำงานทุก 2 วัน เวลา 00:00 น.
+  @Cron('0 0 */2 * *')
+  async syncAllEmployeesJob() {
+    this.logger.log('Running scheduled sync of all employees (Every 2 days at 00:00)...');
+    try {
+      await this.syncService.syncAllEmployees();
+      this.logger.log('Scheduled sync of all employees completed.');
+    } catch (error) {
+      this.logger.error('Error during scheduled employee sync', error);
     }
   }
 }
