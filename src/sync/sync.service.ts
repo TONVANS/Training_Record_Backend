@@ -1,3 +1,4 @@
+// src/sync/sync.service.ts
 import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { PrismaService } from '../prisma/prisma.service';
@@ -17,11 +18,35 @@ import {
     HrmEmployee,
 } from './sync.types';
 
+// ── Progress Event Types ──────────────────────────────
+export type ProgressEventType = 'start' | 'progress' | 'entity_complete' | 'complete' | 'error';
+
+export interface SyncProgressEvent {
+    type: ProgressEventType;
+    /** เปอร์เซ็นต์รวม 0–100 */
+    percent: number;
+    /** entity ที่กำลัง sync อยู่ */
+    entity?: string;
+    /** ข้อความแสดงสถานะ */
+    message: string;
+    /** ผลลัพธ์ของ entity นั้นๆ (เมื่อ entity_complete) */
+    result?: SyncResult;
+    /** ผลลัพธ์ทั้งหมด (เมื่อ complete) */
+    results?: SyncResult[];
+    /** department ที่กำลัง sync (เฉพาะ employees) */
+    currentDept?: string;
+    /** จำนวน dept ที่เสร็จแล้ว */
+    completedDepts?: number;
+    /** จำนวน dept ทั้งหมด */
+    totalDepts?: number;
+}
+
+export type ProgressCallback = (event: SyncProgressEvent) => void;
+
 @Injectable()
 export class SyncService {
     private readonly logger = new Logger(SyncService.name);
-    
-    // ✅ ປະກາດ Type ໄວ້ກ່ອນ
+
     private readonly BASE_URL: string;
     private readonly ENDPOINTS: Record<string, string>;
 
@@ -30,10 +55,9 @@ export class SyncService {
         private readonly prisma: PrismaService,
         private readonly hrmAuth: HrmAuthService,
         private readonly config: ConfigService,
-    ) { 
-        // ✅ ກຳນົດຄ່າໃນ constructor ເພາະ config ຈະພ້ອມໃຊ້ງານຢູ່ບ່ອນນີ້
+    ) {
         this.BASE_URL = this.config.get<string>('HRM_API_URL') || 'https://api-test.edl.com.la/hrm/api/hrms';
-        
+
         this.ENDPOINTS = {
             department: `${this.BASE_URL}/department`,
             division: `${this.BASE_URL}/division`,
@@ -104,18 +128,27 @@ export class SyncService {
         entityName: string,
         items: T[],
         upsertFn: (item: T) => Promise<void>,
+        /** optional: callback ทุก N items เพื่อ report progress ย่อย */
+        onItemProgress?: (done: number, total: number) => void,
     ): Promise<SyncResult> {
         let synced = 0;
         let errors = 0;
         const failedItems: { item: T; reason: string }[] = [];
+        const total = items.length;
 
-        for (const item of items) {
+        for (let i = 0; i < total; i++) {
+            const item = items[i];
             try {
                 await upsertFn(item);
                 synced++;
             } catch (error: any) {
                 errors++;
                 failedItems.push({ item, reason: error.message });
+            }
+
+            // ส่ง progress ทุก 10 items หรือ item สุดท้าย
+            if (onItemProgress && (i % 10 === 9 || i === total - 1)) {
+                onItemProgress(i + 1, total);
             }
         }
 
@@ -160,7 +193,6 @@ export class SyncService {
     async syncDivisions(): Promise<SyncResult> {
         const data = await this.fetchFromHrm<HrmDivision>(this.ENDPOINTS.division, 'Divisions');
 
-        // ✅ Caching: ດຶງ Department ID ທີ່ມີທັງໝົດມາໄວ້ໃນ Set (Query ຄັ້ງດຽວປະຢັດ DB)
         const validDeptIds = new Set(
             (await this.prisma.department.findMany({ select: { id: true } })).map(d => d.id)
         );
@@ -206,7 +238,6 @@ export class SyncService {
     async syncUnits(): Promise<SyncResult> {
         const data = await this.fetchFromHrm<HrmUnit>(this.ENDPOINTS.unit, 'Units');
 
-        // ✅ Caching: ດຶງ Division ID
         const validDivIds = new Set(
             (await this.prisma.division.findMany({ select: { id: true } })).map(d => d.id)
         );
@@ -309,25 +340,29 @@ export class SyncService {
     }
 
     // ================================================================
-    // SYNC EMPLOYEES BY DEPARTMENT ID (WITH PAGINATION & TRANSACTIONS)
+    // SYNC EMPLOYEES BY DEPARTMENT (with optional progress callback)
     // ================================================================
-    async syncEmployeesByDepartment(departmentId: number): Promise<SyncResult> {
+    async syncEmployeesByDepartment(
+        departmentId: number,
+        onProgress?: (done: number, total: number, page: number) => void,
+    ): Promise<SyncResult> {
         this.logger.log(`🔄 Syncing employees for department_id=${departmentId}`);
 
-        // ✅ Caching: ໂຫຼດ Unit ທີ່ມີໃນລະບົບມາໄວ້ ເພື່ອກວດສອບແບບໄວໆ ໂດຍບໍ່ຕ້ອງ Query ທຸກຄົນ
         const validUnitIds = new Set(
             (await this.prisma.unit.findMany({ select: { id: true } })).map(u => u.id)
         );
 
-        const PAGE_SIZE = 50;
+        const PAGE_SIZE = 70;
         let page = 1;
         let totalSynced = 0;
         let totalErrors = 0;
         let hasMore = true;
+        // ประมาณ total จาก first page
+        let estimatedTotal: number | null = null;
 
         while (hasMore) {
             const url = `${this.BASE_URL}/employee?page=${page}&limit=${PAGE_SIZE}&department_id=${departmentId}`;
-            
+
             try {
                 const token = await this.hrmAuth.getToken();
                 const response = await firstValueFrom(
@@ -350,13 +385,26 @@ export class SyncService {
                 }
 
                 const data = response.data;
+
+                // ดึง total count จาก response ถ้ามี
+                if (page === 1 && data?.total != null) {
+                    estimatedTotal = data.total;
+                }
+
                 const employees = this.extractArray<HrmEmployee>(data, `Employee[dept=${departmentId}]`);
 
                 if (employees.length > 0) {
                     const result = await this.upsertMany(
                         `Employee[dept=${departmentId}|page=${page}]`,
                         employees,
-                        async (emp) => this.processSingleEmployee(emp, validUnitIds)
+                        async (emp) => this.processSingleEmployee(emp, validUnitIds),
+                        (done, total) => {
+                            if (onProgress) {
+                                const approxDone = totalSynced + done;
+                                const approxTotal = estimatedTotal ?? (totalSynced + total);
+                                onProgress(approxDone, approxTotal, page);
+                            }
+                        },
                     );
                     totalSynced += result.synced;
                     totalErrors += result.errors;
@@ -366,7 +414,7 @@ export class SyncService {
                     hasMore = false;
                 } else {
                     page++;
-                    await new Promise(r => setTimeout(r, 300)); // Rate limiting
+                    await new Promise(r => setTimeout(r, 300));
                 }
 
             } catch (error: any) {
@@ -379,13 +427,8 @@ export class SyncService {
         return { entity: `Employee[dept=${departmentId}]`, synced: totalSynced, errors: totalErrors };
     }
 
-    /**
-     * ✅ ຂຽນແຍກອອກມາ ແລະ ໃຊ້ Prisma $transaction 
-     * ເພື່ອໃຫ້ຂໍ້ມູນທັງໝົດລົງ DB ພ້ອມກັນ, ຖ້າມີຕາຕະລາງໃດ Error ມັນຈະຍົກເລີກທັງໝົດ
-     */
     private async processSingleEmployee(emp: HrmEmployee, validUnitIds: Set<number>) {
         await this.prisma.$transaction(async (tx) => {
-            // 1. ຈັດການ Special Subject ຖ້າມີ
             const specialSubjectData = emp.office?.specialSubject ?? emp.placeOffice?.specialSubject;
             if (specialSubjectData) {
                 await tx.specialSubject.upsert({
@@ -398,18 +441,15 @@ export class SyncService {
                 });
             }
 
-            // 2. ກວດອີເມວຊໍ້າຊ້ອນ
             let safeEmail = emp.email?.trim() || null;
             if (safeEmail) {
                 const conflict = await tx.employee.findUnique({ where: { email: safeEmail }, select: { emp_id_ref: true } });
                 if (conflict && conflict.emp_id_ref !== emp.emp_id) safeEmail = null;
             }
 
-            // 3. ກວດສອບ Unit (ໃຊ້ Set Memory ທີ່ໂຫຼດມາແລ້ວ ປະຢັດການດຶງ DB)
             const getSafeUnit = (uId?: number | null) => uId && validUnitIds.has(uId) ? uId : null;
             const empUnitId = getSafeUnit(emp.office?.unit_id);
 
-            // 4. Upsert Employee (ໃຊ້ `saved` ເລີຍ ບໍ່ຕ້ອງໄປ Query ໃໝ່)
             const employeeData = {
                 employee_code: emp.emp_code,
                 first_name_la: emp.first_name_la,
@@ -433,7 +473,6 @@ export class SyncService {
                 create: { emp_id_ref: emp.emp_id, ...employeeData },
             });
 
-            // 5. Upsert Office
             if (emp.office) {
                 const o = emp.office;
                 const officeData = {
@@ -453,7 +492,6 @@ export class SyncService {
                 });
             }
 
-            // 6. Upsert PlaceOffice
             if (emp.placeOffice) {
                 const p = emp.placeOffice;
                 const placeData = {
@@ -475,7 +513,7 @@ export class SyncService {
     }
 
     // ================================================================
-    // SYNC ALL EMPLOYEES 
+    // SYNC ALL EMPLOYEES — WITH PROGRESS STREAMING
     // ================================================================
     async syncAllEmployees(): Promise<SyncResult[]> {
         const departments = await this.prisma.department.findMany({ select: { id: true, name: true } });
@@ -485,13 +523,99 @@ export class SyncService {
         for (const dept of departments) {
             this.logger.log(`\n--- Syncing dept: ${dept.name} (${dept.id}) ---`);
             results.push(await this.syncEmployeesByDepartment(dept.id));
-            await new Promise((r) => setTimeout(r, 1000)); // ພັກ 1 ວິນາທີ ລະຫວ່າງພະແນກ
+            await new Promise((r) => setTimeout(r, 1000));
         }
         return results;
     }
 
+    /**
+     * syncAllEmployees พร้อม SSE progress callback
+     * percent คำนวณจาก: (completedDepts / totalDepts) * 100
+     * + progress ภายใน dept แต่ละอัน
+     */
+    async syncAllEmployeesWithProgress(onProgress: ProgressCallback): Promise<SyncResult[]> {
+        const departments = await this.prisma.department.findMany({
+            select: { id: true, name: true },
+            orderBy: { id: 'asc' },
+        });
+        const totalDepts = departments.length;
+
+        onProgress({
+            type: 'start',
+            percent: 0,
+            message: `ເລີ່ມ Sync ພະນັກງານ — ທັງໝົດ ${totalDepts} ພະແນກ`,
+            totalDepts,
+            completedDepts: 0,
+        });
+
+        const results: SyncResult[] = [];
+
+        for (let i = 0; i < totalDepts; i++) {
+            const dept = departments[i];
+            const basePercent = Math.round((i / totalDepts) * 100);
+            const nextPercent = Math.round(((i + 1) / totalDepts) * 100);
+
+            onProgress({
+                type: 'progress',
+                percent: basePercent,
+                entity: `Employee[dept=${dept.id}]`,
+                currentDept: dept.name,
+                completedDepts: i,
+                totalDepts,
+                message: `ກຳລັງ Sync ພະແນກ: ${dept.name} (${i + 1}/${totalDepts})`,
+            });
+
+            const result = await this.syncEmployeesByDepartment(
+                dept.id,
+                (done, total, page) => {
+                    // progress ภายใน dept: interleave ระหว่าง basePercent → nextPercent
+                    const innerFraction = total > 0 ? done / total : 0;
+                    const interpolated = Math.round(basePercent + innerFraction * (nextPercent - basePercent));
+                    onProgress({
+                        type: 'progress',
+                        percent: Math.min(interpolated, nextPercent - 1),
+                        entity: `Employee[dept=${dept.id}]`,
+                        currentDept: dept.name,
+                        completedDepts: i,
+                        totalDepts,
+                        message: `${dept.name}: ດຶງຂໍ້ມູນ ${done}/${total} ຄົນ (ໜ້າ ${page})`,
+                    });
+                },
+            );
+
+            results.push(result);
+
+            onProgress({
+                type: 'entity_complete',
+                percent: nextPercent,
+                entity: `Employee[dept=${dept.id}]`,
+                currentDept: dept.name,
+                completedDepts: i + 1,
+                totalDepts,
+                result,
+                message: `ພະແນກ ${dept.name} ສຳເລັດ: ${result.synced} ຄົນ`,
+            });
+
+            await new Promise((r) => setTimeout(r, 500));
+        }
+
+        const totalSynced = results.reduce((s, r) => s + r.synced, 0);
+        const totalErrors = results.reduce((s, r) => s + r.errors, 0);
+
+        onProgress({
+            type: 'complete',
+            percent: 100,
+            message: `Sync ພະນັກງານທັງໝົດສຳເລັດ! ທັງໝົດ ${totalSynced} ຄົນ`,
+            results,
+            completedDepts: totalDepts,
+            totalDepts,
+        });
+
+        return results;
+    }
+
     // ================================================================
-    // MASTER SYNC
+    // SYNC ALL STRUCTURE — WITH PROGRESS STREAMING
     // ================================================================
     async syncAll(): Promise<SyncResult[]> {
         this.logger.log('🚀 Starting FULL sync...');
@@ -506,6 +630,76 @@ export class SyncService {
         results.push(await this.syncOfficeAsDivisionRef());
 
         this.logger.log('✅ FULL sync complete!');
+        return results;
+    }
+
+    /**
+     * syncAll (โครงสร้าง) พร้อม SSE progress
+     * แบ่งเป็น 6 entities ให้แต่ละ entity = ~16.7%
+     */
+    async syncAllWithProgress(onProgress: ProgressCallback): Promise<SyncResult[]> {
+        const steps: Array<{
+            label: string;
+            entityKey: string;
+            fn: () => Promise<SyncResult>;
+        }> = [
+            { label: 'ພະແນກ (Departments)', entityKey: 'Department', fn: () => this.syncDepartments() },
+            { label: 'ຝ່າຍ (Divisions)', entityKey: 'Division', fn: () => this.syncDivisions() },
+            { label: 'ໜ່ວຍງານ (Units)', entityKey: 'Unit', fn: () => this.syncUnits() },
+            { label: 'ກຸ່ມຕຳແໜ່ງ (Position Groups)', entityKey: 'PositionGroup', fn: () => this.syncPositionGroups() },
+            { label: 'ລະຫັດຕຳແໜ່ງ (Position Codes)', entityKey: 'PositionCode', fn: () => this.syncPositionCodes() },
+            { label: 'ຕຳແໜ່ງ (Positions)', entityKey: 'Position', fn: () => this.syncPositions() },
+        ];
+
+        const total = steps.length;
+        const results: SyncResult[] = [];
+
+        onProgress({
+            type: 'start',
+            percent: 0,
+            message: 'ເລີ່ມ Sync ໂຄງສ້າງທັງໝົດ...',
+        });
+
+        for (let i = 0; i < total; i++) {
+            const step = steps[i];
+            const basePercent = Math.round((i / total) * 100);
+            const nextPercent = Math.round(((i + 1) / total) * 100);
+
+            onProgress({
+                type: 'progress',
+                percent: basePercent,
+                entity: step.entityKey,
+                message: `ກຳລັງ Sync ${step.label} (${i + 1}/${total})`,
+            });
+
+            try {
+                const result = await step.fn();
+                results.push(result);
+
+                onProgress({
+                    type: 'entity_complete',
+                    percent: nextPercent,
+                    entity: step.entityKey,
+                    result,
+                    message: `${step.label} ສຳເລັດ: ${result.synced} ລາຍການ`,
+                });
+            } catch (err: any) {
+                onProgress({
+                    type: 'error',
+                    percent: basePercent,
+                    entity: step.entityKey,
+                    message: `${step.label} ຜິດພາດ: ${err.message}`,
+                });
+            }
+        }
+
+        onProgress({
+            type: 'complete',
+            percent: 100,
+            message: 'Sync ໂຄງສ້າງທັງໝົດສຳເລັດ!',
+            results,
+        });
+
         return results;
     }
 }
