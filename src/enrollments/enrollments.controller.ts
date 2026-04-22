@@ -147,10 +147,16 @@ export class EnrollmentController {
     FileInterceptor('file', {
       storage: diskStorage({
         destination: (req, file, cb) => {
-          const uploadPath = join(process.cwd(), '..', 'uploads', 'certificates');
-          if (!fs.existsSync(uploadPath))
-            fs.mkdirSync(uploadPath, { recursive: true });
-          cb(null, uploadPath);
+          try {
+            const uploadPath = join(process.cwd(), '..', 'uploads', 'certificates');
+            if (!fs.existsSync(uploadPath)) {
+              fs.mkdirSync(uploadPath, { recursive: true });
+            }
+            cb(null, uploadPath);
+          } catch (error) {
+            console.error('Failed to create upload directory:', error);
+            cb(error as any, '');
+          }
         },
         filename: (req, file, cb) => {
           const uniqueSuffix =
