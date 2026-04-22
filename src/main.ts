@@ -25,9 +25,22 @@ async function bootstrap() {
     }),
   );
 
+  // ✅ CORS: รองรับ multiple origins + credentials
+  const corsOrigin = configService.get<string>('CORS_ORIGIN');
+
   app.enableCors({
-    origin: configService.get<string>('CORS_ORIGIN') || '*',
+    origin: corsOrigin
+      ? corsOrigin.split(',').map((o) => o.trim()) // รองรับ comma-separated origins
+      : true, // true = reflect request origin (ใช้กับ credentials:true ได้)
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+    ],
+    exposedHeaders: ['Content-Disposition'],
   });
 
   // ========== STATIC FILES ==========
