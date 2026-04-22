@@ -16,7 +16,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { extname, join } from 'path';
+import { extname, join, basename } from 'path';
 import * as fs from 'fs';
 import { EmployeePortalService } from './employee-portal.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -121,7 +121,7 @@ export class EmployeePortalController {
 
     res.set({
       'Content-Type': isPdf ? 'application/pdf' : 'image/jpeg',
-      'Content-Disposition': `attachment; filename="${filePath.split('/').pop()}"`,
+      'Content-Disposition': `attachment; filename="${basename(filePath)}"`,
     });
 
     return new StreamableFile(fs.createReadStream(filePath));
@@ -148,7 +148,7 @@ export class EmployeePortalController {
 
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filePath.split('/').pop()}"`,
+      'Content-Disposition': `attachment; filename="${basename(filePath)}"`,
     });
 
     return new StreamableFile(fs.createReadStream(filePath));

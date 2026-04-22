@@ -348,6 +348,52 @@ export class EnrollmentService {
     return { message: 'Enrollment deleted successfully' };
   }
 
+  // ========== ADMIN CERTIFICATE UPLOAD ==========
+
+  /**
+   * Admin uploads a certificate for any enrollment
+   */
+  async adminUploadCertificate(enrollmentId: number, fileUrl: string) {
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { id: enrollmentId },
+      include: {
+        employee: { select: { first_name_la: true, last_name_la: true } },
+        course: { select: { title: true } },
+      },
+    });
+
+    if (!enrollment) {
+      throw new NotFoundException(`Enrollment with ID ${enrollmentId} not found`);
+    }
+
+    const updated = await this.prisma.enrollment.update({
+      where: { id: enrollmentId },
+      data: { certificate_url: fileUrl },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            first_name_la: true,
+            last_name_la: true,
+            email: true,
+          },
+        },
+        course: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+      },
+    });
+
+    this.logger.log(
+      `Admin uploaded certificate for ${enrollment.employee.first_name_la} ${enrollment.employee.last_name_la} in ${enrollment.course.title}`,
+    );
+
+    return updated;
+  }
+
   // ========== HELPER METHODS ==========
 
   /**

@@ -318,10 +318,53 @@ export class CoursesService {
   }
 
   async deleteCourse(id: number) {
-    const course = await this.prisma.course.findUnique({ where: { id } });
+    const course = await this.prisma.course.findUnique({
+      where: { id },
+      include: {
+        enrollments: true,
+        materials: true,
+      },
+    });
     if (!course) throw new NotFoundException(`Course with ID ${id} not found`);
-    await this.prisma.course.delete({ where: { id } });
-    this.logger.log(`Deleted course: ${course.title}`);
+
+    // 1. Clean up certificate files from disk
+    for (const enrollment of course.enrollments) {
+      if (enrollment.certificate_url) {
+        try {
+          const certPath = join(process.cwd(), '..', enrollment.certificate_url);
+          if (fs.existsSync(certPath)) {
+            fs.unlinkSync(certPath);
+            this.logger.log(`Deleted certificate file: ${certPath}`);
+          }
+        } catch (e) {
+          this.logger.warn(`Failed to delete certificate file for enrollment ${enrollment.id}: ${e}`);
+        }
+      }
+    }
+
+    // 2. Clean up material files from disk
+    for (const material of course.materials) {
+      if (material.type === MaterialType.PDF) {
+        try {
+          const matPath = join(process.cwd(), '..', material.file_path_or_link);
+          if (fs.existsSync(matPath)) {
+            fs.unlinkSync(matPath);
+            this.logger.log(`Deleted material file: ${matPath}`);
+          }
+        } catch (e) {
+          this.logger.warn(`Failed to delete material file ${material.id}: ${e}`);
+        }
+      }
+    }
+
+    // 3. Delete enrollments, materials, then the course in a transaction
+    await this.prisma.$transaction([
+      this.prisma.enrollment.deleteMany({ where: { course_id: id } }),
+      this.prisma.courseMaterial.deleteMany({ where: { course_id: id } }),
+      this.prisma.course.delete({ where: { id } }),
+    ]);
+
+    this.logger.log(`Deleted course: ${course.title} (with ${course.enrollments.length} enrollments, ${course.materials.length} materials)`);
     return { message: 'Course deleted successfully' };
   }
 

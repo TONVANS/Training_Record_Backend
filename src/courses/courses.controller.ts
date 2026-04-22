@@ -19,7 +19,7 @@ import {
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { extname, join } from 'path';
+import { extname, join, basename } from 'path';
 import * as fs from 'fs';
 import {
   ApiTags,
@@ -144,7 +144,7 @@ export class CoursesController {
 
     res.set({
       'Content-Type': contentType,
-      'Content-Disposition': `attachment; filename="${filePath.split('/').pop()}"`,
+      'Content-Disposition': `attachment; filename="${basename(filePath)}"`,
     });
 
     return new StreamableFile(fs.createReadStream(filePath));

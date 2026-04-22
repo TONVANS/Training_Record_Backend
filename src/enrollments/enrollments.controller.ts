@@ -10,7 +10,14 @@ import {
   Query,
   ParseIntPipe,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage } from 'multer';
+import { extname, join } from 'path';
+import * as fs from 'fs';
 import {
   ApiTags,
   ApiOperation,
@@ -128,5 +135,37 @@ export class EnrollmentController {
   @ApiResponse({ status: 404, description: 'Enrollment not found' })
   async deleteEnrollment(@Param('id', ParseIntPipe) id: number) {
     return this.enrollmentService.deleteEnrollment(id);
+  }
+
+  // ✅ Admin upload certificate for any enrollment
+  @Post(':id/certificate')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Upload certificate for an enrollment (Admin only)' })
+  @ApiResponse({ status: 200, description: 'Certificate uploaded successfully' })
+  @ApiResponse({ status: 404, description: 'Enrollment not found' })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: diskStorage({
+        destination: (req, file, cb) => {
+          const uploadPath = join(process.cwd(), '..', 'uploads', 'certificates');
+          if (!fs.existsSync(uploadPath))
+            fs.mkdirSync(uploadPath, { recursive: true });
+          cb(null, uploadPath);
+        },
+        filename: (req, file, cb) => {
+          const uniqueSuffix =
+            Date.now() + '-' + Math.round(Math.random() * 1e9);
+          cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
+        },
+      }),
+    }),
+  )
+  async uploadCertificate(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No file uploaded');
+    const fileUrl = `/uploads/certificates/${file.filename}`;
+    return this.enrollmentService.adminUploadCertificate(id, fileUrl);
   }
 }
