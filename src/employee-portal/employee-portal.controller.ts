@@ -36,6 +36,14 @@ export class EmployeePortalController {
     return this.portalService.getAvailableCourses(user.sub || user.id);
   }
 
+  @Get('courses/:id')
+  getCourseById(
+    @Param('id', ParseIntPipe) courseId: number,
+    @CurrentUser() user: any,
+  ) {
+    return this.portalService.getCourseById(courseId, user.sub || user.id);
+  }
+
   @Get('enrollments')
   getMyEnrollments(@CurrentUser() user: any) {
     return this.portalService.getMyEnrollments(user.sub || user.id);

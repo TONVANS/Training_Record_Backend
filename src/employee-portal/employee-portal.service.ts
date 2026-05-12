@@ -12,11 +12,6 @@ export class EmployeePortalService {
         status: {
           in: ['SCHEDULED', 'ACTIVE', 'COMPLETED'],
         },
-        enrollments: {
-          some: {
-            employee_id: employeeId,
-          },
-        },
       },
       select: {
         id: true,
@@ -49,6 +44,45 @@ export class EmployeePortalService {
         start_date: 'asc',
       },
     });
+  }
+
+  async getCourseById(courseId: number, employeeId: number) {
+    const course = await this.prisma.course.findUnique({
+      where: { id: courseId },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        category: true,
+        start_date: true,
+        end_date: true,
+        format: true,
+        location_type: true,
+        location: true,
+        country: true,
+        status: true,
+        trainer: true,
+        institution: true,
+        organization: true,
+        materials: {
+          select: {
+            id: true,
+            type: true,
+            file_path_or_link: true,
+            created_at: true,
+          },
+        },
+        enrollments: {
+          where: { employee_id: employeeId },
+        },
+      },
+    });
+
+    if (!course) {
+      throw new NotFoundException(`Course with ID ${courseId} not found`);
+    }
+
+    return course;
   }
 
   async getMyEnrollments(employeeId: number) {
