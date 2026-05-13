@@ -1,49 +1,83 @@
 // src/employee-portal/employee-portal.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmployeePortalFilterDto } from './dto/employee-portal-filter.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class EmployeePortalService {
   constructor(private readonly prisma: PrismaService) { }
 
-  async getAvailableCourses(employeeId: number) {
-    return this.prisma.course.findMany({
-      where: {
-        status: {
-          in: ['SCHEDULED', 'ACTIVE', 'COMPLETED'],
-        },
+  async getAvailableCourses(employeeId: number, filters?: EmployeePortalFilterDto) {
+    const page = filters?.page ?? 1;
+    const limit = filters?.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.CourseWhereInput = {
+      status: {
+        in: ['SCHEDULED', 'ACTIVE', 'COMPLETED'],
       },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        category: true,
-        start_date: true,
-        end_date: true,
-        format: true,
-        location_type: true,
-        location: true,
-        country: true,
-        status: true,
-        trainer: true,
-        institution: true,
-        organization: true,
-        materials: {
-          select: {
-            id: true,
-            type: true,
-            file_path_or_link: true,
-            created_at: true,
+    };
+
+    if (filters?.title) {
+      where.title = { contains: filters.title, mode: 'insensitive' };
+    }
+    if (filters?.category_id) {
+      where.category_id = Number(filters.category_id);
+    }
+    if (filters?.format) {
+      where.format = filters.format;
+    }
+    if (filters?.location_type) {
+      where.location_type = filters.location_type;
+    }
+    if (filters?.start_date) {
+      where.start_date = { gte: new Date(filters.start_date) };
+    }
+    if (filters?.end_date) {
+      where.end_date = { lte: new Date(filters.end_date) };
+    }
+
+    const [total, data] = await Promise.all([
+      this.prisma.course.count({ where }),
+      this.prisma.course.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          category: true,
+          start_date: true,
+          end_date: true,
+          format: true,
+          location_type: true,
+          location: true,
+          country: true,
+          status: true,
+          trainer: true,
+          institution: true,
+          organization: true,
+          materials: {
+            select: {
+              id: true,
+              type: true,
+              file_path_or_link: true,
+              created_at: true,
+            },
+          },
+          enrollments: {
+            where: { employee_id: employeeId },
           },
         },
-        enrollments: {
-          where: { employee_id: employeeId },
+        orderBy: {
+          start_date: 'asc',
         },
-      },
-      orderBy: {
-        start_date: 'asc',
-      },
-    });
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   async getCourseById(courseId: number, employeeId: number) {
@@ -85,34 +119,66 @@ export class EmployeePortalService {
     return course;
   }
 
-  async getMyEnrollments(employeeId: number) {
-    return this.prisma.enrollment.findMany({
-      where: { employee_id: employeeId },
-      include: {
-        course: {
-          select: {
-            id: true,
-            title: true,
-            description: true,
-            category: true,
-            start_date: true,
-            end_date: true,
-            format: true,
-            location_type: true,
-            location: true,
-            country: true,
-            status: true,
-            trainer: true,
-            institution: true,
-            organization: true,
-            materials: true,
+  async getMyEnrollments(employeeId: number, filters?: EmployeePortalFilterDto) {
+    const page = filters?.page ?? 1;
+    const limit = filters?.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const courseWhere: Prisma.CourseWhereInput = {};
+    if (filters?.title) {
+      courseWhere.title = { contains: filters.title, mode: 'insensitive' };
+    }
+    if (filters?.category_id) {
+      courseWhere.category_id = Number(filters.category_id);
+    }
+    if (filters?.format) courseWhere.format = filters.format;
+    if (filters?.location_type) courseWhere.location_type = filters.location_type;
+    if (filters?.start_date) {
+      courseWhere.start_date = { gte: new Date(filters.start_date) };
+    }
+    if (filters?.end_date) {
+      courseWhere.end_date = { lte: new Date(filters.end_date) };
+    }
+
+    const where: Prisma.EnrollmentWhereInput = {
+      employee_id: employeeId,
+      ...(Object.keys(courseWhere).length > 0 && { course: courseWhere }),
+    };
+
+    const [total, data] = await Promise.all([
+      this.prisma.enrollment.count({ where }),
+      this.prisma.enrollment.findMany({
+        where,
+        include: {
+          course: {
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              category: true,
+              start_date: true,
+              end_date: true,
+              format: true,
+              location_type: true,
+              location: true,
+              country: true,
+              status: true,
+              trainer: true,
+              institution: true,
+              organization: true,
+              materials: true,
+            },
           },
         },
-      },
-      orderBy: {
-        enrolled_at: 'desc',
-      },
-    });
+        orderBy: {
+          enrolled_at: 'desc',
+        },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   async getMyProfile(employeeId: number) {
@@ -147,34 +213,64 @@ export class EmployeePortalService {
   }
 
   // ✅ ດຶງ certificates ທັງໝົດຂອງ employee (ສະເພາະ enrollment ທີ່ມີ certificate)
-  async getMyCertificates(employeeId: number) {
-    return this.prisma.enrollment.findMany({
-      where: {
-        employee_id: employeeId,
-        certificate_url: { not: null },
-      },
-      select: {
-        id: true,
-        certificate_url: true,
-        enrolled_at: true,
-        status: true,
-        course: {
-          select: {
-            id: true,
-            title: true,
-            category: true,
-            start_date: true,
-            end_date: true,
-            trainer: true,
-            institution: true,
-            organization: true,
+  async getMyCertificates(employeeId: number, filters?: EmployeePortalFilterDto) {
+    const page = filters?.page ?? 1;
+    const limit = filters?.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const courseWhere: Prisma.CourseWhereInput = {};
+    if (filters?.title) {
+      courseWhere.title = { contains: filters.title, mode: 'insensitive' };
+    }
+    if (filters?.category_id) {
+      courseWhere.category_id = Number(filters.category_id);
+    }
+    if (filters?.format) courseWhere.format = filters.format;
+    if (filters?.location_type) courseWhere.location_type = filters.location_type;
+    if (filters?.start_date) {
+      courseWhere.start_date = { gte: new Date(filters.start_date) };
+    }
+    if (filters?.end_date) {
+      courseWhere.end_date = { lte: new Date(filters.end_date) };
+    }
+
+    const where: Prisma.EnrollmentWhereInput = {
+      employee_id: employeeId,
+      certificate_url: { not: null },
+      ...(Object.keys(courseWhere).length > 0 && { course: courseWhere }),
+    };
+
+    const [total, data] = await Promise.all([
+      this.prisma.enrollment.count({ where }),
+      this.prisma.enrollment.findMany({
+        where,
+        select: {
+          id: true,
+          certificate_url: true,
+          enrolled_at: true,
+          status: true,
+          course: {
+            select: {
+              id: true,
+              title: true,
+              category: true,
+              start_date: true,
+              end_date: true,
+              trainer: true,
+              institution: true,
+              organization: true,
+            },
           },
         },
-      },
-      orderBy: {
-        enrolled_at: 'desc',
-      },
-    });
+        orderBy: {
+          enrolled_at: 'desc',
+        },
+        skip,
+        take: limit,
+      }),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   // ✅ ດຶງ certificate ຂອງ enrollment ໜຶ່ງ (ກວດສອບສິດ)

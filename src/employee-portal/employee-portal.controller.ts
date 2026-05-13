@@ -13,6 +13,7 @@ import {
   StreamableFile,
   NotFoundException,
   Res,
+  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -24,6 +25,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { EmployeePortalFilterDto } from './dto/employee-portal-filter.dto';
 
 @Controller('employee-portal')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -32,8 +34,11 @@ export class EmployeePortalController {
   constructor(private readonly portalService: EmployeePortalService) { }
 
   @Get('courses')
-  getAvailableCourses(@CurrentUser() user: any) {
-    return this.portalService.getAvailableCourses(user.sub || user.id);
+  getAvailableCourses(
+    @CurrentUser() user: any,
+    @Query() filters: EmployeePortalFilterDto,
+  ) {
+    return this.portalService.getAvailableCourses(user.sub || user.id, filters);
   }
 
   @Get('courses/:id')
@@ -45,8 +50,11 @@ export class EmployeePortalController {
   }
 
   @Get('enrollments')
-  getMyEnrollments(@CurrentUser() user: any) {
-    return this.portalService.getMyEnrollments(user.sub || user.id);
+  getMyEnrollments(
+    @CurrentUser() user: any,
+    @Query() filters: EmployeePortalFilterDto,
+  ) {
+    return this.portalService.getMyEnrollments(user.sub || user.id, filters);
   }
 
   @Get('profile')
@@ -56,8 +64,11 @@ export class EmployeePortalController {
 
   // ✅ GET: ດຶງ certificates ທັງໝົດຂອງຕົນເອງ
   @Get('certificates')
-  getMyCertificates(@CurrentUser() user: any) {
-    return this.portalService.getMyCertificates(user.sub || user.id);
+  getMyCertificates(
+    @CurrentUser() user: any,
+    @Query() filters: EmployeePortalFilterDto,
+  ) {
+    return this.portalService.getMyCertificates(user.sub || user.id, filters);
   }
 
   // ✅ GET: ດຶງ certificate ຂອງ enrollment ໜຶ່ງ
