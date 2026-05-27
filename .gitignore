@@ -62,3 +62,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 /docker-compose.yml
 /nginx/nginx.conf
 Dockerfile
+
+#Json
+postman_auth_collection.json

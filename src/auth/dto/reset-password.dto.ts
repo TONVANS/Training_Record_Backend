@@ -10,4 +10,3 @@ export class ResetPasswordDto {
   @IsNotEmpty({ message: 'ກະລຸນາປ້ອນລະຫັດພະນັກງານ' })
   employee_code: string;
 }
-

@@ -241,22 +241,43 @@ export class AuthService {
    * @returns Success message with affected rows count
    */
   async resetPasswordAll() {
-    // 1. กำหนดລະຫັດຜ່ານ Default
     const defaultPassword = 'EDL@123456';
-    
-    // 2. Hash ລະຫັດຜ່ານ (Hash ບາດດຽວ ແລ້ວເອົາໄປໃຊ້ກັບທຸກຄົນເລີຍ ເພື່ອຄວາມໄວ)
-    const hashedPassword = await bcrypt.hash(defaultPassword, this.SALT_ROUNDS);
 
-    // 3. ອັບເດດລະຫັດຜ່ານຂອງທຸກຄົນໃນ Database
-    const result = await this.prisma.employee.updateMany({
-      data: { password: hashedPassword },
+    // 1. ດຶງຂໍ້ມູນພະນັກງານທັງໝົດ
+    const employees = await this.prisma.employee.findMany({
+      select: { id: true },
     });
 
-    this.logger.log(`Password reset for ALL employees (${result.count} records) to default`);
-    
-    return { 
+    let updatedCount = 0;
+    const chunkSize = 50; // Process in chunks to prevent blocking the event loop
+
+    // 2. ເຂົ້າລະຫັດ (Hash) ໃໝ່ທຸກຄັ້ງສຳລັບທຸກຄົນ ເພື່ອຄວາມປອດໄພ (Unique Salt)
+    for (let i = 0; i < employees.length; i += chunkSize) {
+      const chunk = employees.slice(i, i + chunkSize);
+
+      await Promise.all(
+        chunk.map(async (employee) => {
+          const hashedPassword = await bcrypt.hash(
+            defaultPassword,
+            this.SALT_ROUNDS,
+          );
+          await this.prisma.employee.update({
+            where: { id: employee.id },
+            data: { password: hashedPassword },
+          });
+        }),
+      );
+
+      updatedCount += chunk.length;
+    }
+
+    this.logger.log(
+      `Password reset for ALL employees (${updatedCount} records) to default with unique hashes`,
+    );
+
+    return {
       message: 'ຣີເຊັດລະຫັດຜ່ານຂອງພະນັກງານທຸກຄົນສຳເລັດແລ້ວ',
-      affected_rows: result.count 
+      affected_rows: updatedCount,
     };
   }
 
@@ -324,11 +345,11 @@ export class AuthService {
     });
 
     this.logger.log(`Role changed for employee: ${employeeCode} to ${newRole}`);
-    
-    return { 
-      message: 'ປ່ຽນສິດການເຂົ້າເຖິງສຳເລັດແລ້ວ', 
-      employee_code: employeeCode, 
-      new_role: newRole 
+
+    return {
+      message: 'ປ່ຽນສິດການເຂົ້າເຖິງສຳເລັດແລ້ວ',
+      employee_code: employeeCode,
+      new_role: newRole,
     };
   }
 }

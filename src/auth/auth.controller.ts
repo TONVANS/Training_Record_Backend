@@ -33,7 +33,7 @@ import { ChangeRoleDto } from './dto/change-role';
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(private readonly authService: AuthService) {}
 
   /**
    * Register a new employee account
@@ -96,13 +96,14 @@ export class AuthController {
    * Reset password for ALL employees (Admin Only)
    */
   @UseGuards(JwtAuthGuard, RolesGuard) // ຕ້ອງ Login ແລະ ກວດສອບສິດ
-  @Roles(Role.ADMIN)                   // ຕ້ອງເປັນ ADMIN ເທົ່ານັ້ນ
+  @Roles(Role.ADMIN) // ຕ້ອງເປັນ ADMIN ເທົ່ານັ້ນ
   @ApiBearerAuth()
   @Post('reset-password-all')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Reset password for ALL employees (Admin only)',
-    description: 'Reset password for everyone to default password "EDL@123456".',
+    description:
+      'Reset password for everyone to default password "EDL@123456".',
   })
   @ApiResponse({ status: 200, description: 'All passwords reset successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - Admins only' })
@@ -135,10 +136,10 @@ export class AuthController {
   }
 
   /**
-     * Change role for an employee (Admin Only)
-     */
+   * Change role for an employee (Admin Only)
+   */
   @UseGuards(JwtAuthGuard, RolesGuard) // ຕ້ອງ Login ແລະ ກວດສອບສິດ
-  @Roles(Role.ADMIN)                   // ຕ້ອງເປັນ ADMIN ເທົ່ານັ້ນ
+  @Roles(Role.ADMIN) // ຕ້ອງເປັນ ADMIN ເທົ່ານັ້ນ
   @ApiBearerAuth()
   @Post('change-role')
   @HttpCode(HttpStatus.OK)
