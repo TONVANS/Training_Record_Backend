@@ -290,28 +290,84 @@ export class CoursesService {
       ...(end_date && { end_date: new Date(end_date) }),
     };
 
-    const updatedCourse = await this.prisma.course.update({
-      where: { id },
-      data: updateData,
-      include: {
-        category: true,
-        materials: true,
-        enrollments: {
-          include: {
-            employee: {
-              select: {
-                id: true,
-                first_name_la: true,
-                last_name_la: true,
-                email: true,
-                position_id: true,
-                department_id: true,
+    let updatedCourse;
+    const newStatus = updateCourseDto.status;
+
+    if (newStatus && newStatus !== existingCourse.status) {
+      let mappedEnrollmentStatus: EnrollmentStatus | undefined;
+      switch (newStatus) {
+        case CourseStatus.SCHEDULED:
+          mappedEnrollmentStatus = EnrollmentStatus.ENROLLED;
+          break;
+        case CourseStatus.ACTIVE:
+          mappedEnrollmentStatus = EnrollmentStatus.IN_PROGRESS;
+          break;
+        case CourseStatus.COMPLETED:
+          mappedEnrollmentStatus = EnrollmentStatus.COMPLETED;
+          break;
+      }
+
+      updatedCourse = await this.prisma.$transaction(async (prisma) => {
+        const course = await prisma.course.update({
+          where: { id },
+          data: updateData,
+        });
+
+        if (mappedEnrollmentStatus) {
+          await prisma.enrollment.updateMany({
+            where: { course_id: id },
+            data: { status: mappedEnrollmentStatus },
+          });
+        }
+        return course;
+      });
+
+      // Refetch with includes
+      updatedCourse = await this.prisma.course.findUnique({
+        where: { id },
+        include: {
+          category: true,
+          materials: true,
+          enrollments: {
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  first_name_la: true,
+                  last_name_la: true,
+                  email: true,
+                  position_id: true,
+                  department_id: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      });
+    } else {
+      updatedCourse = await this.prisma.course.update({
+        where: { id },
+        data: updateData,
+        include: {
+          category: true,
+          materials: true,
+          enrollments: {
+            include: {
+              employee: {
+                select: {
+                  id: true,
+                  first_name_la: true,
+                  last_name_la: true,
+                  email: true,
+                  position_id: true,
+                  department_id: true,
+                },
+              },
+            },
+          },
+        },
+      });
+    }
 
     this.logger.log(`Updated course: ${updatedCourse.title}`);
     return updatedCourse;
