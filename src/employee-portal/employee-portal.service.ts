@@ -8,6 +8,13 @@ import { Prisma } from '@prisma/client';
 export class EmployeePortalService {
   constructor(private readonly prisma: PrismaService) { }
 
+  private mapEnrollmentStatus(enrollmentStatus: any, courseStatus: any): any {
+    if (courseStatus === 'SCHEDULED') return 'ENROLLED';
+    if (courseStatus === 'ACTIVE') return 'IN_PROGRESS';
+    if (courseStatus === 'COMPLETED') return 'COMPLETED';
+    return enrollmentStatus;
+  }
+
   async getAvailableCourses(employeeId: number, filters?: EmployeePortalFilterDto) {
     const page = filters?.page ?? 1;
     const limit = filters?.limit ?? 10;
@@ -77,7 +84,15 @@ export class EmployeePortalService {
       }),
     ]);
 
-    return { data, total, page, limit };
+    const mappedData = data.map(course => ({
+      ...course,
+      enrollments: course.enrollments.map(enr => ({
+        ...enr,
+        status: this.mapEnrollmentStatus((enr as any).status, course.status)
+      }))
+    }));
+
+    return { data: mappedData, total, page, limit };
   }
 
   async getCourseById(courseId: number, employeeId: number) {
@@ -116,7 +131,13 @@ export class EmployeePortalService {
       throw new NotFoundException(`Course with ID ${courseId} not found`);
     }
 
-    return course;
+    return {
+      ...course,
+      enrollments: course.enrollments.map(enr => ({
+        ...enr,
+        status: this.mapEnrollmentStatus((enr as any).status, course.status)
+      }))
+    };
   }
 
   async getMyEnrollments(employeeId: number, filters?: EmployeePortalFilterDto) {
@@ -178,7 +199,12 @@ export class EmployeePortalService {
       }),
     ]);
 
-    return { data, total, page, limit };
+    const mappedData = data.map(enr => ({
+      ...enr,
+      status: this.mapEnrollmentStatus(enr.status, (enr as any).course.status)
+    }));
+
+    return { data: mappedData, total, page, limit };
   }
 
   async getMyProfile(employeeId: number) {
@@ -259,6 +285,7 @@ export class EmployeePortalService {
               trainer: true,
               institution: true,
               organization: true,
+              status: true,
             },
           },
         },
@@ -293,6 +320,7 @@ export class EmployeePortalService {
             trainer: true,
             institution: true,
             organization: true,
+            status: true,
           },
         },
       },
@@ -310,7 +338,10 @@ export class EmployeePortalService {
       );
     }
 
-    return enrollment;
+    return {
+      ...enrollment,
+      status: this.mapEnrollmentStatus(enrollment.status, enrollment.course.status)
+    };
   }
 
   async uploadCertificate(
@@ -357,6 +388,15 @@ export class EmployeePortalService {
       throw new NotFoundException(`No permission to access this material`);
     }
 
-    return material;
+    return {
+      ...material,
+      course: {
+        ...material.course,
+        enrollments: material.course.enrollments.map(enr => ({
+          ...enr,
+          status: this.mapEnrollmentStatus((enr as any).status, material.course.status)
+        }))
+      }
+    };
   }
 }
