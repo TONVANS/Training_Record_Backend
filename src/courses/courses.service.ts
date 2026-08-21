@@ -99,8 +99,8 @@ export class CoursesService {
     const startDate = new Date(start_date);
     const endDate = new Date(end_date);
 
-    if (endDate <= startDate) {
-      throw new BadRequestException('End date must be after start date');
+    if (endDate < startDate) {
+      throw new BadRequestException('End date must be after or equal to start date');
     }
 
     this.validateLocationLogic(
@@ -111,10 +111,13 @@ export class CoursesService {
     );
 
     const now = new Date();
+    const endOfDay = new Date(endDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
     let calculatedStatus: CourseStatus = CourseStatus.SCHEDULED;
-    if (now > endDate) {
+    if (now > endOfDay) {
       calculatedStatus = CourseStatus.COMPLETED;
-    } else if (now >= startDate && now <= endDate) {
+    } else if (now >= startDate && now <= endOfDay) {
       calculatedStatus = CourseStatus.ACTIVE;
     }
 
@@ -277,8 +280,8 @@ export class CoursesService {
       const endDate = updateCourseDto.end_date
         ? new Date(updateCourseDto.end_date)
         : existingCourse.end_date;
-      if (endDate <= startDate) {
-        throw new BadRequestException('End date must be after start date');
+      if (endDate < startDate) {
+        throw new BadRequestException('End date must be after or equal to start date');
       }
     }
 
